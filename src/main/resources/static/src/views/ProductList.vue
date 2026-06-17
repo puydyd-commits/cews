@@ -2,10 +2,20 @@
   <div class="page-container">
     <div class="page-header">
       <h1 class="page-title">商品列表</h1>
-      <router-link to="/product/add" class="add-btn">
-        <span class="btn-icon">➕</span>
-        <span>新增商品</span>
-      </router-link>
+      <div class="header-actions">
+        <el-button 
+          type="success" 
+          @click="handleExport" 
+          :loading="exportLoading"
+          class="export-btn"
+        >
+          📊 导出 Excel
+        </el-button>
+        <router-link to="/product/add" class="add-btn">
+          <span class="btn-icon">➕</span>
+          <span>新增商品</span>
+        </router-link>
+      </div>
     </div>
     
     <div class="filter-card">
@@ -65,8 +75,16 @@
         <el-table-column prop="origin" label="产地" width="120" align="center" />
         <el-table-column prop="creator" label="创建人" width="100" align="center" />
         <el-table-column prop="createTime" label="创建时间" width="180" align="center" />
-        <el-table-column label="操作" width="200" align="center">
+        <el-table-column label="操作" width="240" align="center">
           <template #default="scope">
+            <el-button 
+              type="info" 
+              size="small" 
+              @click.stop="handleDetail(scope.row)"
+              class="detail-btn"
+            >
+              👁️ 详情
+            </el-button>
             <el-button 
               type="primary" 
               size="small" 
@@ -105,15 +123,19 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { getProductList, deleteProduct } from '../api/product'
 import { getCategoryList } from '../api/category'
 import { useRouter } from 'vue-router'
+import { exportProductToExcel } from '../utils/exportExcel'
+import { showConfirm, showSuccess, showError } from '../utils/errorHandler'
 
 const router = useRouter()
 const loading = ref(false)
+const exportLoading = ref(false)
 const tableData = ref([])
 const categories = ref([])
+const allProducts = ref([])
 
 const searchForm = ref({
   productName: '',
@@ -151,6 +173,13 @@ async function loadProductList() {
     }
     const res = await getProductList(params)
     tableData.value = res.data.list || []
+    
+    if (pagination.value.pageNum === 1) {
+      allProducts.value = [...tableData.value]
+    } else {
+      allProducts.value = [...allProducts.value, ...tableData.value]
+    }
+    
     pagination.value.total = res.data.total || 0
   } catch (error) {
     console.error('加载商品列表失败:', error)
@@ -161,6 +190,7 @@ async function loadProductList() {
 
 function handleSearch() {
   pagination.value.pageNum = 1
+  allProducts.value = []
   loadProductList()
 }
 
@@ -170,11 +200,14 @@ function handleReset() {
     categoryId: ''
   }
   pagination.value.pageNum = 1
+  allProducts.value = []
   loadProductList()
 }
 
 function handleSizeChange(val) {
   pagination.value.pageSize = val
+  pagination.value.pageNum = 1
+  allProducts.value = []
   loadProductList()
 }
 
@@ -184,7 +217,11 @@ function handleCurrentChange(val) {
 }
 
 function handleRowClick(row) {
-  router.push(`/product/edit/${row.id}`)
+  router.push(`/product/detail/${row.id}`)
+}
+
+function handleDetail(row) {
+  router.push(`/product/detail/${row.id}`)
 }
 
 function handleEdit(row) {
@@ -193,22 +230,32 @@ function handleEdit(row) {
 
 async function handleDelete(row) {
   try {
-    await ElMessageBox.confirm(
-      `确定要删除商品「${row.productName}」吗？`,
-      '提示',
-      {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
-        type: 'warning'
-      }
-    )
+    await showConfirm(`确定要删除商品「${row.productName}」吗？`)
     await deleteProduct(row.id)
-    ElMessage.success('删除成功')
+    showSuccess('删除成功')
     loadProductList()
   } catch (error) {
     if (error !== 'cancel') {
-      ElMessage.error('删除失败')
+      showError('删除失败')
     }
+  }
+}
+
+async function handleExport() {
+  if (tableData.value.length === 0) {
+    showWarning('当前没有数据可导出')
+    return
+  }
+  
+  exportLoading.value = true
+  try {
+    exportProductToExcel(tableData.value, `商品列表_${new Date().toLocaleDateString('zh-CN').replace(/\//g, '-')}`)
+    showSuccess('导出成功')
+  } catch (error) {
+    console.error('导出失败:', error)
+    showError('导出失败')
+  } finally {
+    exportLoading.value = false
   }
 }
 </script>
@@ -230,6 +277,22 @@ async function handleDelete(row) {
   font-weight: 600;
   color: #333;
   margin: 0;
+}
+
+.header-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.export-btn {
+  padding: 10px 20px;
+  border-radius: 8px;
+  transition: all 0.3s ease;
+}
+
+.export-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(67, 160, 71, 0.3);
 }
 
 .add-btn {
@@ -310,9 +373,14 @@ async function handleDelete(row) {
   font-weight: 600;
 }
 
-.edit-btn, .delete-btn {
-  margin-right: 8px;
+.detail-btn, .edit-btn, .delete-btn {
+  margin-right: 5px;
   transition: all 0.3s ease;
+}
+
+.detail-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(144, 164, 174, 0.3);
 }
 
 .edit-btn:hover {
@@ -351,6 +419,11 @@ async function handleDelete(row) {
     flex-direction: column;
     align-items: flex-start;
     gap: 15px;
+  }
+  
+  .header-actions {
+    width: 100%;
+    flex-wrap: wrap;
   }
 }
 </style>

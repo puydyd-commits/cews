@@ -1,0 +1,21 @@
+{
+  "name": "product-management",
+  "version": "1.0.0",
+  "description": "商品管理系统前端",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "vue": "^3.4.21",
+    "element-plus": "^2.6.1",
+    "axios": "^1.6.7",
+    "vue-router": "^4.3.0",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.4",
+    "vite": "^5.1.4"
+  }
+}
