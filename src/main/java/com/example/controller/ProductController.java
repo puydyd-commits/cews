@@ -1,15 +1,24 @@
 package com.example.controller;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.example.dao.CategoryMapper;
+import com.example.dao.ProductMapper;
+import com.example.pojo.Category;
+import com.example.pojo.Product;
 import com.example.pojo.ProductAddRequest;
 import com.example.service.ProductService;
 import com.example.url.Result;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.util.StringUtils;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/product")
@@ -18,9 +27,121 @@ public class ProductController {
     @Autowired
     private ProductService productService;
 
+    @Autowired
+    private ProductMapper productMapper;
+
+    @Autowired
+    private CategoryMapper categoryMapper;
+
     @PostMapping("/add")
     public ResponseEntity<Result<Void>> addProduct(@Valid @RequestBody ProductAddRequest request) {
         productService.addProduct(request);
         return ResponseEntity.ok(Result.success("商品新增成功", null));
+    }
+
+    @GetMapping("/list")
+    public ResponseEntity<Result<Map<String, Object>>> getProductList(
+            @RequestParam(defaultValue = "1") Integer pageNum,
+            @RequestParam(defaultValue = "10") Integer pageSize,
+            @RequestParam(required = false) String productName,
+            @RequestParam(required = false) Long categoryId) {
+
+        Page<Product> page = new Page<>(pageNum, pageSize);
+        LambdaQueryWrapper<Product> queryWrapper = new LambdaQueryWrapper<>();
+
+        if (StringUtils.hasText(productName)) {
+            queryWrapper.like(Product::getProductName, productName);
+        }
+        if (categoryId != null && categoryId > 0) {
+            queryWrapper.eq(Product::getCategoryId, categoryId);
+        }
+
+        queryWrapper.orderByDesc(Product::getCreateTime);
+        IPage<Product> productPage = productMapper.selectPage(page, queryWrapper);
+
+        List<Product> productList = productPage.getRecords();
+        Map<Long, String> categoryMap = new HashMap<>();
+        List<Category> categories = categoryMapper.selectList(null);
+        categories.forEach(cat -> categoryMap.put(cat.getId(), cat.getCategoryName()));
+
+        productList.forEach(product -> {
+            product.setCategoryName(categoryMap.get(product.getCategoryId()));
+        });
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("list", productList);
+        result.put("total", productPage.getTotal());
+
+        return ResponseEntity.ok(Result.success(result));
+    }
+
+    @GetMapping("/{id}")
+    public ResponseEntity<Result<Product>> getProductById(@PathVariable Long id) {
+        Product product = productMapper.selectById(id);
+        if (product == null) {
+            return ResponseEntity.ok(Result.error(404, "商品不存在"));
+        }
+        
+        Category category = categoryMapper.selectById(product.getCategoryId());
+        if (category != null) {
+            product.setCategoryName(category.getCategoryName());
+        }
+        
+        return ResponseEntity.ok(Result.success(product));
+    }
+
+    @PutMapping("/{id}")
+    public ResponseEntity<Result<Void>> updateProduct(
+            @PathVariable Long id,
+            @Valid @RequestBody ProductAddRequest request) {
+
+        Product existingProduct = productMapper.selectById(id);
+        if (existingProduct == null) {
+            return ResponseEntity.ok(Result.error(404, "商品不存在"));
+        }
+
+        String trimmedProductName = request.getProductName().trim();
+        if (!StringUtils.hasText(trimmedProductName)) {
+            return ResponseEntity.ok(Result.error(400, "商品名称不能为空"));
+        }
+
+        Long categoryId = request.getCategoryId();
+        Category category = categoryMapper.selectById(categoryId);
+        if (category == null) {
+            return ResponseEntity.ok(Result.error(400, "分类ID不存在"));
+        }
+
+        LambdaQueryWrapper<Product> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(Product::getCategoryId, categoryId)
+                .eq(Product::getProductName, trimmedProductName)
+                .ne(Product::getId, id);
+        if (productMapper.selectCount(queryWrapper) > 0) {
+            return ResponseEntity.ok(Result.error(400, "同一分类下已存在同名商品"));
+        }
+
+        Product product = new Product();
+        product.setId(id);
+        product.setProductName(trimmedProductName);
+        product.setPrice(request.getPrice());
+        product.setStock(request.getStock());
+        product.setCategoryId(categoryId);
+        product.setImageUrl(request.getImageUrl());
+        product.setOrigin(request.getOrigin());
+        product.setUpdateTime(java.time.LocalDateTime.now());
+
+        productMapper.updateById(product);
+
+        return ResponseEntity.ok(Result.success("商品更新成功", null));
+    }
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Result<Void>> deleteProduct(@PathVariable Long id) {
+        Product product = productMapper.selectById(id);
+        if (product == null) {
+            return ResponseEntity.ok(Result.error(404, "商品不存在"));
+        }
+
+        productMapper.deleteById(id);
+        return ResponseEntity.ok(Result.success("商品删除成功", null));
     }
 }

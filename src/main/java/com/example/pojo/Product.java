@@ -28,6 +28,9 @@ public class Product {
     @TableField("category_id")
     private Long categoryId;
 
+    @TableField(exist = false)
+    private String categoryName;
+
     @TableField("image_url")
     private String imageUrl;
 
