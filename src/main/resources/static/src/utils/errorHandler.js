@@ -1,4 +1,4 @@
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox, ElLoading } from 'element-plus'
 
 const errorCodeMap = {
   400: '请求参数错误',
@@ -11,18 +11,50 @@ const errorCodeMap = {
   504: '网关超时'
 }
 
+let loadingInstance = null
+
+export function showLoading(message = '加载中...') {
+  loadingInstance = ElLoading.service({
+    lock: true,
+    text: message,
+    spinner: 'el-icon-loading',
+    background: 'rgba(0, 0, 0, 0.7)'
+  })
+}
+
+export function hideLoading() {
+  if (loadingInstance) {
+    loadingInstance.close()
+    loadingInstance = null
+  }
+}
+
 export function handleError(error) {
   console.error('全局错误捕获:', error)
+  
+  hideLoading()
   
   if (error.response) {
     const { status, data } = error.response
     
     if (data && data.message) {
-      ElMessage.error(data.message)
+      ElMessage({
+        type: 'error',
+        message: data.message,
+        duration: 3000
+      })
     } else if (errorCodeMap[status]) {
-      ElMessage.error(errorCodeMap[status])
+      ElMessage({
+        type: 'error',
+        message: errorCodeMap[status],
+        duration: 3000
+      })
     } else {
-      ElMessage.error(`请求失败，状态码: ${status}`)
+      ElMessage({
+        type: 'error',
+        message: `请求失败，状态码: ${status}`,
+        duration: 3000
+      })
     }
     
     if (status === 401) {
@@ -31,32 +63,67 @@ export function handleError(error) {
       }, 1500)
     }
   } else if (error.request) {
-    ElMessage.error('网络请求超时或失败，请检查网络连接')
+    ElMessage({
+      type: 'error',
+      message: '网络请求超时或失败，请检查网络连接',
+      duration: 3000
+    })
   } else {
-    ElMessage.error(error.message || '请求失败')
+    ElMessage({
+      type: 'error',
+      message: error.message || '请求失败',
+      duration: 3000
+    })
   }
 }
 
 export function showSuccess(message) {
-  ElMessage.success(message)
+  ElMessage({
+    type: 'success',
+    message,
+    duration: 2000
+  })
 }
 
 export function showWarning(message) {
-  ElMessage.warning(message)
+  ElMessage({
+    type: 'warning',
+    message,
+    duration: 2000
+  })
 }
 
 export function showError(message) {
-  ElMessage.error(message)
+  ElMessage({
+    type: 'error',
+    message,
+    duration: 3000
+  })
 }
 
-export function showConfirm(message, title = '提示') {
+export function showInfo(message) {
+  ElMessage({
+    type: 'info',
+    message,
+    duration: 2000
+  })
+}
+
+export function showConfirm(message, title = '提示', type = 'warning') {
   return ElMessageBox.confirm(
     message,
     title,
     {
       confirmButtonText: '确定',
       cancelButtonText: '取消',
-      type: 'warning'
+      type
     }
   )
+}
+
+export function showAlert(message, title = '提示', type = 'info') {
+  return ElMessageBox.alert(message, title, {
+    confirmButtonText: '确定',
+    type
+  })
 }

@@ -7,6 +7,7 @@
           type="success" 
           @click="handleExport" 
           :loading="exportLoading"
+          :disabled="exportLoading || tableData.length === 0"
           class="export-btn"
         >
           📊 导出 Excel
@@ -25,6 +26,7 @@
             v-model="searchForm.productName" 
             placeholder="请输入商品名称"
             class="search-input"
+            @input="handleSearchDebounce"
           />
         </el-form-item>
         <el-form-item label="商品分类">
@@ -33,6 +35,7 @@
             placeholder="请选择分类"
             class="search-select"
             filterable
+            @change="handleSearch"
           >
             <el-option label="全部" :value="''" />
             <el-option 
@@ -105,7 +108,7 @@
         </el-table-column>
       </el-table>
       
-      <div class="pagination-wrapper">
+      <div v-if="pagination.total > 0" class="pagination-wrapper">
         <el-pagination
           @size-change="handleSizeChange"
           @current-change="handleCurrentChange"
@@ -117,25 +120,28 @@
           class="pagination"
         />
       </div>
+      <div v-else class="empty-state">
+        <span class="empty-icon">📦</span>
+        <span class="empty-text">暂无商品数据</span>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { getProductList, deleteProduct } from '../api/product'
 import { getCategoryList } from '../api/category'
 import { useRouter } from 'vue-router'
 import { exportProductToExcel } from '../utils/exportExcel'
-import { showConfirm, showSuccess, showError } from '../utils/errorHandler'
+import { debounce } from '../utils/debounce'
+import { showConfirm, showSuccess, showError, showWarning } from '../utils/errorHandler'
 
 const router = useRouter()
 const loading = ref(false)
 const exportLoading = ref(false)
 const tableData = ref([])
 const categories = ref([])
-const allProducts = ref([])
 
 const searchForm = ref({
   productName: '',
@@ -148,9 +154,22 @@ const pagination = ref({
   total: 0
 })
 
+let debounceTimer = null
+
+const handleSearchDebounce = debounce(() => {
+  pagination.value.pageNum = 1
+  loadProductList()
+}, 500)
+
 onMounted(() => {
   loadCategories()
   loadProductList()
+})
+
+onUnmounted(() => {
+  if (debounceTimer) {
+    clearTimeout(debounceTimer)
+  }
 })
 
 async function loadCategories() {
@@ -159,6 +178,7 @@ async function loadCategories() {
     categories.value = res.data || []
   } catch (error) {
     console.error('加载分类失败:', error)
+    showError('加载分类失败')
   }
 }
 
@@ -166,21 +186,21 @@ async function loadProductList() {
   loading.value = true
   try {
     const params = {
-      pageNum: pagination.value.pageNum,
-      pageSize: pagination.value.pageSize,
+      pageNum: Math.max(1, pagination.value.pageNum),
+      pageSize: Math.max(1, Math.min(100, pagination.value.pageSize)),
       productName: searchForm.value.productName,
       categoryId: searchForm.value.categoryId
     }
     const res = await getProductList(params)
     tableData.value = res.data.list || []
-    
-    if (pagination.value.pageNum === 1) {
-      allProducts.value = [...tableData.value]
-    } else {
-      allProducts.value = [...allProducts.value, ...tableData.value]
-    }
-    
     pagination.value.total = res.data.total || 0
+    pagination.value.pageNum = res.data.pageNum || 1
+    pagination.value.pageSize = res.data.pageSize || 10
+    
+    if (pagination.value.total > 0 && tableData.value.length === 0) {
+      pagination.value.pageNum = Math.max(1, Math.ceil(pagination.value.total / pagination.value.pageSize))
+      await loadProductList()
+    }
   } catch (error) {
     console.error('加载商品列表失败:', error)
   } finally {
@@ -190,7 +210,6 @@ async function loadProductList() {
 
 function handleSearch() {
   pagination.value.pageNum = 1
-  allProducts.value = []
   loadProductList()
 }
 
@@ -200,18 +219,27 @@ function handleReset() {
     categoryId: ''
   }
   pagination.value.pageNum = 1
-  allProducts.value = []
   loadProductList()
 }
 
 function handleSizeChange(val) {
   pagination.value.pageSize = val
   pagination.value.pageNum = 1
-  allProducts.value = []
   loadProductList()
 }
 
 function handleCurrentChange(val) {
+  if (val < 1) {
+    pagination.value.pageNum = 1
+    return
+  }
+  
+  const maxPage = Math.max(1, Math.ceil(pagination.value.total / pagination.value.pageSize))
+  if (val > maxPage && pagination.value.total > 0) {
+    pagination.value.pageNum = maxPage
+    return
+  }
+  
   pagination.value.pageNum = val
   loadProductList()
 }
@@ -249,7 +277,8 @@ async function handleExport() {
   
   exportLoading.value = true
   try {
-    exportProductToExcel(tableData.value, `商品列表_${new Date().toLocaleDateString('zh-CN').replace(/\//g, '-')}`)
+    const timestamp = new Date().toLocaleDateString('zh-CN').replace(/\//g, '-')
+    exportProductToExcel(tableData.value, `商品列表_${timestamp}`)
     showSuccess('导出成功')
   } catch (error) {
     console.error('导出失败:', error)
@@ -290,7 +319,7 @@ async function handleExport() {
   transition: all 0.3s ease;
 }
 
-.export-btn:hover {
+.export-btn:hover:not(:disabled) {
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(67, 160, 71, 0.3);
 }
@@ -402,6 +431,24 @@ async function handleExport() {
 .pagination {
   display: flex;
   align-items: center;
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  color: #999;
+}
+
+.empty-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+}
+
+.empty-text {
+  font-size: 16px;
 }
 
 @media screen and (max-width: 768px) {

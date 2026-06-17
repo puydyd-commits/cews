@@ -22,6 +22,7 @@
                 v-model="form.productName" 
                 placeholder="请输入商品名称"
                 class="form-input"
+                @input="handleProductNameInput"
               />
             </el-form-item>
           </el-col>
@@ -32,6 +33,7 @@
                 placeholder="请选择商品分类"
                 class="form-select"
                 filterable
+                @change="handleCategoryChange"
               >
                 <el-option 
                   v-for="cat in categories" 
@@ -53,6 +55,7 @@
                 class="form-input"
                 type="number"
                 :min="0"
+                step="0.01"
               />
             </el-form-item>
           </el-col>
@@ -78,6 +81,7 @@
                   action="/api/upload"
                   :show-file-list="false"
                   :on-success="handleImageUpload"
+                  :on-error="handleImageUploadError"
                   :before-upload="beforeImageUpload"
                 >
                   <img v-if="form.imageUrl" :src="form.imageUrl" class="uploaded-image" />
@@ -86,6 +90,7 @@
                     <span class="upload-text">点击上传图片</span>
                   </div>
                 </el-upload>
+                <div v-if="imageError" class="image-error">{{ imageError }}</div>
               </div>
             </el-form-item>
           </el-col>
@@ -95,13 +100,20 @@
                 v-model="form.origin" 
                 placeholder="请输入生产产地（可选）"
                 class="form-input"
+                maxlength="50"
               />
             </el-form-item>
           </el-col>
         </el-row>
         
         <el-form-item class="form-actions">
-          <el-button type="primary" @click="handleSubmit" :loading="loading" class="submit-btn">
+          <el-button 
+            type="primary" 
+            @click="handleSubmit" 
+            :loading="submitting"
+            :disabled="submitting"
+            class="submit-btn"
+          >
             ✓ 提交
           </el-button>
           <el-button @click="handleReset" class="reset-btn">
@@ -114,14 +126,15 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import { addProduct } from '../api/product'
 import { getCategoryList } from '../api/category'
 import { useRouter } from 'vue-router'
+import { showSuccess, showError, showWarning } from '../utils/errorHandler'
 
 const router = useRouter()
-const loading = ref(false)
+const submitting = ref(false)
+const imageError = ref('')
 const formRef = ref(null)
 const categories = ref([])
 
@@ -152,8 +165,16 @@ const rules = {
   ]
 }
 
+let debounceTimer = null
+
 onMounted(() => {
   loadCategories()
+})
+
+onUnmounted(() => {
+  if (debounceTimer) {
+    clearTimeout(debounceTimer)
+  }
 })
 
 async function loadCategories() {
@@ -162,39 +183,71 @@ async function loadCategories() {
     categories.value = res.data || []
   } catch (error) {
     console.error('加载分类失败:', error)
+    showError('加载分类失败')
   }
+}
+
+function handleProductNameInput() {
+  imageError.value = ''
+}
+
+function handleCategoryChange() {
+  imageError.value = ''
 }
 
 function handleImageUpload(response) {
   form.imageUrl = response.data.url
-  ElMessage.success('图片上传成功')
+  imageError.value = ''
+  showSuccess('图片上传成功')
+}
+
+function handleImageUploadError(error) {
+  imageError.value = '图片上传失败，请重试'
+  showError('图片上传失败')
 }
 
 function beforeImageUpload(file) {
   const isImage = file.type.startsWith('image/')
   if (!isImage) {
-    ElMessage.error('请上传图片格式的文件')
+    imageError.value = '请上传图片格式的文件（支持 jpg、png、gif）'
+    showError(imageError.value)
     return false
   }
+  
+  const validFormats = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
+  if (!validFormats.includes(file.type)) {
+    imageError.value = '仅支持 jpg、png、gif、webp 格式的图片'
+    showError(imageError.value)
+    return false
+  }
+  
   const isLt2M = file.size / 1024 / 1024 < 2
   if (!isLt2M) {
-    ElMessage.error('图片大小不能超过2MB')
+    imageError.value = '图片大小不能超过2MB'
+    showError(imageError.value)
     return false
   }
+  
+  imageError.value = ''
   return true
 }
 
 async function handleSubmit() {
+  if (submitting.value) {
+    showWarning('正在提交中，请稍候')
+    return
+  }
+  
   if (!formRef.value) return
   
   try {
     const valid = await formRef.value.validate()
     if (!valid) return
     
-    loading.value = true
+    submitting.value = true
     
     const submitData = {
-      productName: form.productName,
+      productName: form.productName.trim(),
       price: parseFloat(form.price),
       stock: parseInt(form.stock),
       categoryId: form.categoryId,
@@ -203,12 +256,15 @@ async function handleSubmit() {
     }
     
     await addProduct(submitData)
-    ElMessage.success('商品新增成功')
-    router.push('/product/list')
+    showSuccess('商品新增成功')
+    
+    setTimeout(() => {
+      router.push('/product/list')
+    }, 1500)
   } catch (error) {
     console.error('新增商品失败:', error)
   } finally {
-    loading.value = false
+    submitting.value = false
   }
 }
 
@@ -217,6 +273,7 @@ function handleReset() {
     formRef.value.resetFields()
   }
   form.imageUrl = ''
+  imageError.value = ''
 }
 </script>
 
@@ -324,6 +381,12 @@ function handleReset() {
   color: #999;
 }
 
+.image-error {
+  color: #e74c3c;
+  font-size: 12px;
+  margin-top: 8px;
+}
+
 .form-actions {
   display: flex;
   justify-content: center;
@@ -344,7 +407,7 @@ function handleReset() {
   border: none;
 }
 
-.submit-btn:hover {
+.submit-btn:hover:not(:disabled) {
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(52, 152, 219, 0.3);
 }
